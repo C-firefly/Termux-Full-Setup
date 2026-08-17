@@ -801,7 +801,7 @@ def menu():
 	print("3. Network Tools")
 	print("4. Setup ZSH (Theme, Autosuggestions, Autocomplete, Highlighting")
 	print()
-    print("All")
+	print("All)
 	print()
 
 	choice = input(
