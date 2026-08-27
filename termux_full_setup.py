@@ -1,19 +1,28 @@
+#!/data/data/com.termux/files/usr/bin/python
+
 # ============================================================
 # Termux Full Setup
 # ============================================================
 #
-# A complete automated setup script for Termux that prepares
-# a fresh Termux environment with essential packages,
-# development tools, ZSH, Oh My Zsh, plugins, themes,
-# utilities, aliases and personal configuration.
+# Safe / Repeatable / Idempotent Termux setup
 #
-# This code is created by C-Firefly
+# Features:
+#   - Mandatory packages
+#   - zip / unzip
+#   - Development languages
+#   - Network tools
+#   - ZSH
+#   - Oh My Zsh
+#   - Plugins
+#   - Powerlevel10k
+#   - Safe .zshrc handling
+#   - KeyboardInterrupt handling
+#   - Safe "All" re-run
 #
-# GitHub: https://c-firefly.github.io
 # ============================================================
 
-
 import os
+import sys
 import time
 import json
 import shutil
@@ -26,18 +35,38 @@ from pathlib import Path
 # ============================================================
 
 try:
-	import rich
+    from rich.console import Console
+    from rich.panel import Panel
 except ImportError:
-	print("[•] Installing Rich...")
-	subprocess.run(
-		["python", "-m", "pip", "install", "rich"],
-		check=False
-	)
+    print("[•] Installing Rich...")
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.align import Align
-from rich.table import Table
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "rich",
+            ],
+            check=True,
+        )
+
+        from rich.console import Console
+        from rich.panel import Panel
+
+    except Exception as e:
+        print(f"[!] Could not install Rich: {e}")
+        print("[!] Continuing without Rich.")
+
+        class Console:
+            def print(self, *args, **kwargs):
+                print(*args)
+
+        class Panel:
+            @staticmethod
+            def fit(text):
+                return text
 
 
 console = Console()
@@ -56,10 +85,7 @@ p = "\033[1;35m"
 c = "\033[1;36m"
 w = "\033[1;37m"
 
-stp = "\033[1;0m"
-itl = "\033[1;3m"
-unl = "\033[1;4m"
-lgt = "\033[1;1m"
+stp = "\033[0m"
 
 
 # ============================================================
@@ -68,29 +94,28 @@ lgt = "\033[1;1m"
 
 HOME = str(Path.home())
 
-# Directory where this Python script exists
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
 
 
 # ============================================================
 # PROJECT PATHS
 # ============================================================
 
-Z_Profile = os.path.join(HOME, ".zprofile")
-
 MY_BIN = os.path.join(
-	HOME,
-	".my_bin"
+    HOME,
+    ".my_bin"
 )
 
-User_Dir = os.path.join(
-	MY_BIN,
-	"User"
+USER_DIR = os.path.join(
+    MY_BIN,
+    "User"
 )
 
-User_File = os.path.join(
-	User_Dir,
-	"user_info.json"
+USER_FILE = os.path.join(
+    USER_DIR,
+    "user_info.json"
 )
 
 
@@ -99,173 +124,295 @@ User_File = os.path.join(
 # ============================================================
 
 ZSH_DIR = os.path.join(
-	HOME,
-	".oh-my-zsh"
+    HOME,
+    ".oh-my-zsh"
 )
 
 ZSH_CUSTOM = os.path.join(
-	ZSH_DIR,
-	"custom"
+    ZSH_DIR,
+    "custom"
 )
 
 ZSH_PLUGIN_DIR = os.path.join(
-	ZSH_CUSTOM,
-	"plugins"
+    ZSH_CUSTOM,
+    "plugins"
 )
 
 ZSH_THEME_DIR = os.path.join(
-	ZSH_CUSTOM,
-	"themes"
+    ZSH_CUSTOM,
+    "themes"
 )
 
 ALIAS_DIR = os.path.join(
-	ZSH_CUSTOM,
-	"aliases"
+    ZSH_CUSTOM,
+    "aliases"
 )
 
-Aliash = os.path.join(
-	ALIAS_DIR,
-	"from_setup.zsh"
+ALIAS_FILE = os.path.join(
+    ALIAS_DIR,
+    "from_setup.zsh"
 )
 
-
-# ============================================================
-# CUSTOM ZSHRC
-# ============================================================
-
-Custom_Zshrc = os.path.join(
-	BASE_DIR,
-	".zshrc"
-)
-
-Target_Zshrc = os.path.join(
-	HOME,
-	".zshrc"
-)
-
-Backup_Zshrc = os.path.join(
-	HOME,
-	".zshrc.backup"
+P10K_DIR = os.path.join(
+    ZSH_THEME_DIR,
+    "powerlevel10k"
 )
 
 
 # ============================================================
-# UTILITY
+# ZSHRC
+# ============================================================
+
+CUSTOM_ZSHRC = os.path.join(
+    BASE_DIR,
+    ".zshrc"
+)
+
+TARGET_ZSHRC = os.path.join(
+    HOME,
+    ".zshrc"
+)
+
+BACKUP_ZSHRC = os.path.join(
+    HOME,
+    ".zshrc.backup"
+)
+
+ZSH_SETUP_MARKER = os.path.join(
+    HOME,
+    ".termux_setup_zsh"
+)
+
+
+# ============================================================
+# CONSTANTS
+# ============================================================
+
+SETUP_MARKER = "# >>> TERMUX-FULL-SETUP >>>"
+SETUP_MARKER_END = "# <<< TERMUX-FULL-SETUP <<<"
+
+ZSH_SETUP_VERSION = "1"
+
+
+# ============================================================
+# GLOBAL INTERRUPT STATE
+# ============================================================
+
+INTERRUPTED = False
+
+
+# ============================================================
+# KEYBOARD INTERRUPT
+# ============================================================
+
+def handle_interrupt():
+    global INTERRUPTED
+
+    INTERRUPTED = True
+
+    print()
+    print()
+    print(
+        f"{y}[!] Setup interrupted by user (Ctrl+C).{stp}"
+    )
+
+    print(
+        f"{c}[•] No existing configuration was intentionally removed.{stp}"
+    )
+
+    print(
+        f"{c}[•] You can run the setup again safely.{stp}"
+    )
+
+    sys.exit(130)
+
+
+# ============================================================
+# CLEAR
 # ============================================================
 
 def clear():
-	"""
-	Clear terminal screen.
-	"""
-	os.system("clear")
+    try:
+        os.system("clear")
+    except KeyboardInterrupt:
+        handle_interrupt()
 
+
+# ============================================================
+# PAUSE
+# ============================================================
 
 def pause(seconds=1):
-	"""
-	Small delay.
-	"""
-	time.sleep(seconds)
+    try:
+        time.sleep(seconds)
+    except KeyboardInterrupt:
+        handle_interrupt()
 
+
+# ============================================================
+# PRINT HELPERS
+# ============================================================
 
 def print_success(message):
-	print(f"{g}[✓] {message}{stp}")
+    print(
+        f"{g}[✓] {message}{stp}"
+    )
 
 
 def print_error(message):
-	print(f"{r}[✗] {message}{stp}")
+    print(
+        f"{r}[✗] {message}{stp}"
+    )
 
 
 def print_info(message):
-	print(f"{c}[•] {message}{stp}")
+    print(
+        f"{c}[•] {message}{stp}"
+    )
+
+
+def print_warning(message):
+    print(
+        f"{y}[!] {message}{stp}"
+    )
 
 
 # ============================================================
 # COMMAND RUNNER
 # ============================================================
 
-def run_cmd(cmd, clear_after=True):
-	"""
-	Run shell command and return exit code.
-	"""
+def run_cmd(
+    cmd,
+    clear_after=False,
+    check=False,
+):
+    """
+    Run shell command safely.
 
-	print()
-	print(f"{y}[+] Running:{stp} {cmd}")
+    Returns:
+        exit code
+    """
 
-	result = subprocess.run(
-		cmd,
-		shell=True
-	)
+    print()
+    print(
+        f"{y}[+] Running:{stp} {cmd}"
+    )
 
-	if result.returncode == 0:
-		print_success("Command completed successfully.")
-	else:
-		print_error(
-			f"Command failed! Exit code: {result.returncode}"
-		)
+    try:
 
-	if clear_after:
-		pause(2)
-		clear()
+        result = subprocess.run(
+            cmd,
+            shell=True,
+        )
 
-	return result.returncode
+    except KeyboardInterrupt:
+        handle_interrupt()
+
+    except Exception as e:
+        print_error(
+            f"Command execution error: {e}"
+        )
+        return 1
+
+    if result.returncode == 0:
+
+        print_success(
+            "Command completed successfully."
+        )
+
+    else:
+
+        print_error(
+            f"Command failed! Exit code: "
+            f"{result.returncode}"
+        )
+
+        if check:
+            return result.returncode
+
+    if clear_after:
+        pause(1)
+        clear()
+
+    return result.returncode
 
 
 # ============================================================
-# CREATE PROJECT DIRECTORIES
+# COMMAND EXISTS
+# ============================================================
+
+def command_exists(command):
+    return shutil.which(command) is not None
+
+
+# ============================================================
+# PACKAGE INSTALLED
+# ============================================================
+
+def package_installed(package):
+    """
+    Check whether a Termux package is installed.
+    """
+
+    try:
+
+        result = subprocess.run(
+            [
+                "dpkg",
+                "-s",
+                package,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        return result.returncode == 0
+
+    except KeyboardInterrupt:
+        handle_interrupt()
+
+    except Exception:
+        return False
+
+
+# ============================================================
+# CREATE DIRECTORIES
 # ============================================================
 
 def create_folders():
 
-	print_info("Creating required directories...")
+    print_info(
+        "Creating required directories..."
+    )
 
-	os.makedirs(
-		MY_BIN,
-		exist_ok=True
-	)
+    os.makedirs(
+        MY_BIN,
+        exist_ok=True,
+    )
 
-	os.makedirs(
-		User_Dir,
-		exist_ok=True
-	)
+    os.makedirs(
+        USER_DIR,
+        exist_ok=True,
+    )
 
-	# ZSH custom directories (No need, these will automatically create)
-	#os.makedirs(
-	#	ZSH_CUSTOM,
-	#	exist_ok=True
-	#)
+    if not os.path.exists(USER_FILE):
 
-	#os.makedirs(
-	#	ZSH_PLUGIN_DIR,
-	#	exist_ok=True
-	#)
+        with open(
+            USER_FILE,
+            "w",
+            encoding="utf-8",
+        ) as f:
 
-	#os.makedirs(
-	#	ZSH_THEME_DIR,
-	#	exist_ok=True
-	#)
+            json.dump(
+                {},
+                f,
+                indent=4,
+                ensure_ascii=False,
+            )
 
-	#os.makedirs(
-	#	ALIAS_DIR,
-	#	exist_ok=True
-	#)
-
-	# Create user_info.json if missing
-	if not os.path.exists(User_File):
-
-		with open(
-			User_File,
-			"w",
-			encoding="utf-8"
-		) as f:
-
-			json.dump(
-				{},
-				f,
-				indent=4,
-				ensure_ascii=False
-			)
-
-	print_success("Required directories created.")
+    print_success(
+        "Required directories ready."
+    )
 
 
 # ============================================================
@@ -274,40 +421,76 @@ def create_folders():
 
 def set_username():
 
-	print()
-	print("=" * 40)
-	print("       USER INFORMATION SETUP")
-	print("=" * 40)
-	print()
+    print()
+    print("=" * 45)
+    print("        USER INFORMATION SETUP")
+    print("=" * 45)
+    print()
 
-	name = input("Name        : ").strip()
-	title = input("Title       : ").strip()
-	device_name = input("Device Name : ").strip()
+    try:
 
-	user_info = {
-		"name": name,
-		"title": title,
-		"device_name": device_name
-	}
+        name = input(
+            "Name        : "
+        ).strip()
 
-	with open(
-		User_File,
-		"w",
-		encoding="utf-8"
-	) as f:
+        title = input(
+            "Title       : "
+        ).strip()
 
-		json.dump(
-			user_info,
-			f,
-			indent=4,
-			ensure_ascii=False
-		)
+        device_name = input(
+            "Device Name : "
+        ).strip()
 
-	print()
-	print_success("User information saved.")
-	print(f"{c}File:{stp} {User_File}")
+    except KeyboardInterrupt:
+        handle_interrupt()
 
-	pause(1)
+    except EOFError:
+
+        print_warning(
+            "Input closed. Keeping existing user information."
+        )
+
+        return
+
+    user_info = {
+        "name": name,
+        "title": title,
+        "device_name": device_name,
+    }
+
+    try:
+
+        with open(
+            USER_FILE,
+            "w",
+            encoding="utf-8",
+        ) as f:
+
+            json.dump(
+                user_info,
+                f,
+                indent=4,
+                ensure_ascii=False,
+            )
+
+    except Exception as e:
+
+        print_error(
+            f"Could not save user information: {e}"
+        )
+
+        return
+
+    print()
+    print_success(
+        "User information saved."
+    )
+
+    print(
+        f"{c}File:{stp} {USER_FILE}"
+    )
+
+    pause(1)
 
 
 # ============================================================
@@ -316,88 +499,379 @@ def set_username():
 
 def mandatory_install():
 
-	console.print(
-		Panel.fit(
-			"[bold green]Installing Mandatory Packages[/bold green]"
-		)
-	)
+    console.print(
+        Panel.fit(
+            "[bold green]"
+            "Installing Mandatory Packages"
+            "[/bold green]"
+        )
+    )
 
-	run_cmd(
-		"pkg update -y && pkg upgrade -y"
-	)
+    packages = [
+        "git",
+        "curl",
+        "wget",
+        "zsh",
+        "nano",
+        "vim",
+        "neovim",
+        "tree",
+        "unzip",
+        "zip",
+        "htop",
+        "eza",
+    ]
 
-	run_cmd(
-		"pkg install "
-		"git "
-		"curl "
-		"wget "
-		"zsh "
-		"nano "
-		"vim "
-		"neovim "
-		"tree "
-		"unzip "
-		"zip "
-		"htop "
-		"eza "
-		"-y"
-	)
+    missing = [
+        package
+        for package in packages
+        if not package_installed(package)
+    ]
 
-	print_success("Mandatory packages completed.")
+    if not missing:
+
+        print_success(
+            "All mandatory packages are already installed."
+        )
+
+        return True
+
+    print_info(
+        "Missing packages:"
+    )
+
+    print(
+        " ".join(missing)
+    )
+
+    command = (
+        "pkg install "
+        + " ".join(missing)
+        + " -y"
+    )
+
+    code = run_cmd(
+        command,
+        check=True,
+    )
+
+    if code != 0:
+
+        print_error(
+            "Mandatory package installation failed."
+        )
+
+        return False
+
+    print_success(
+        "Mandatory packages completed."
+    )
+
+    return True
 
 
 # ============================================================
-# ZSH INSTALLATION
+# ZSH INSTALLED?
+# ============================================================
+
+def zsh_installed():
+
+    return (
+        command_exists("zsh")
+        or package_installed("zsh")
+    )
+
+
+# ============================================================
+# OH MY ZSH INSTALLED?
+# ============================================================
+
+def oh_my_zsh_installed():
+
+    return os.path.isdir(
+        ZSH_DIR
+    )
+
+
+# ============================================================
+# PLUGIN INSTALLED
+# ============================================================
+
+def plugin_installed(plugin_name):
+
+    plugin_path = os.path.join(
+        ZSH_PLUGIN_DIR,
+        plugin_name,
+    )
+
+    return os.path.isdir(
+        plugin_path
+    )
+
+
+# ============================================================
+# THEME INSTALLED
+# ============================================================
+
+def theme_installed():
+
+    return os.path.isdir(
+        P10K_DIR
+    )
+
+
+# ============================================================
+# ZSHRC HAS OUR CONFIG
+# ============================================================
+
+def zshrc_has_setup():
+
+    if not os.path.isfile(
+        TARGET_ZSHRC
+    ):
+        return False
+
+    try:
+
+        with open(
+            TARGET_ZSHRC,
+            "r",
+            encoding="utf-8",
+        ) as f:
+
+            content = f.read()
+
+        return (
+            SETUP_MARKER in content
+            and
+            SETUP_MARKER_END in content
+        )
+
+    except Exception:
+        return False
+
+
+# ============================================================
+# ZSH COMPLETE CHECK
+# ============================================================
+
+def is_zsh_setup_complete():
+
+    required = [
+        zsh_installed(),
+        oh_my_zsh_installed(),
+        plugin_installed(
+            "zsh-autosuggestions"
+        ),
+        plugin_installed(
+            "zsh-syntax-highlighting"
+        ),
+        theme_installed(),
+        os.path.isfile(ALIAS_FILE),
+        zshrc_has_setup(),
+    ]
+
+    marker_exists = os.path.isfile(
+        ZSH_SETUP_MARKER
+    )
+
+    return (
+        all(required)
+        and marker_exists
+    )
+
+
+# ============================================================
+# INSTALL ZSH + OH MY ZSH
 # ============================================================
 
 def install_zsh():
 
-	console.print(
-		Panel.fit(
-			"[bold green]Installing ZSH + Oh My Zsh[/bold green]"
-		)
-	)
+    console.print(
+        Panel.fit(
+            "[bold green]"
+            "Installing ZSH + Oh My Zsh"
+            "[/bold green]"
+        )
+    )
 
-	# --------------------------------------------------------
-	# 1. Install ZSH
-	# --------------------------------------------------------
+    # --------------------------------------------------------
+    # ZSH
+    # --------------------------------------------------------
 
-	print_info("Installing ZSH...")
+    if zsh_installed():
 
-	run_cmd(
-		"pkg install zsh -y"
-	)
+        print_success(
+            "ZSH is already installed. Skipping."
+        )
 
-	# --------------------------------------------------------
-	# 2. Set ZSH as default shell
-	# --------------------------------------------------------
+    else:
 
-	print_info("Setting ZSH as default shell...")
+        print_info(
+            "Installing ZSH..."
+        )
 
-	run_cmd(
-		"chsh -s zsh"
-	)
+        code = run_cmd(
+            "pkg install zsh -y",
+            check=True,
+        )
 
-	# --------------------------------------------------------
-	# 3. Install Oh My Zsh
-	# --------------------------------------------------------
+        if code != 0:
+            return False
 
-	print_info("Installing Oh My Zsh...")
+    # --------------------------------------------------------
+    # Default shell
+    # --------------------------------------------------------
 
-	ohmyzsh_command = (
-		'RUNZSH=no CHSH=no KEEP_ZSHRC=yes '
-		'sh -c "$(curl -fsSL '
-		'https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh'
-		')"'
-	)
+    if command_exists("chsh"):
 
-	run_cmd(
-		ohmyzsh_command
-	)
+        print_info(
+            "Checking default shell..."
+        )
 
-	print_success(
-		"ZSH + Oh My Zsh installation completed."
-	)
+        try:
+
+            shell_path = shutil.which(
+                "zsh"
+            )
+
+            if shell_path:
+
+                result = subprocess.run(
+                    [
+                        "chsh",
+                        "-s",
+                        shell_path,
+                    ]
+                )
+
+                if result.returncode == 0:
+
+                    print_success(
+                        "ZSH set as default shell."
+                    )
+
+                else:
+
+                    print_warning(
+                        "Could not change default shell."
+                    )
+
+        except KeyboardInterrupt:
+            handle_interrupt()
+
+        except Exception as e:
+
+            print_warning(
+                f"chsh failed: {e}"
+            )
+
+    # --------------------------------------------------------
+    # Oh My Zsh
+    # --------------------------------------------------------
+
+    if oh_my_zsh_installed():
+
+        print_success(
+            "Oh My Zsh already installed. Skipping."
+        )
+
+    else:
+
+        print_info(
+            "Installing Oh My Zsh..."
+        )
+
+        ohmyzsh_command = (
+            'RUNZSH=no '
+            'CHSH=no '
+            'KEEP_ZSHRC=yes '
+            'sh -c "$(curl -fsSL '
+            'https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh'
+            ')"'
+        )
+
+        code = run_cmd(
+            ohmyzsh_command,
+            check=True,
+        )
+
+        if code != 0:
+
+            print_error(
+                "Oh My Zsh installation failed."
+            )
+
+            return False
+
+    # --------------------------------------------------------
+    # Verify
+    # --------------------------------------------------------
+
+    if not oh_my_zsh_installed():
+
+        print_error(
+            "Oh My Zsh directory was not found."
+        )
+
+        return False
+
+    print_success(
+        "ZSH + Oh My Zsh ready."
+    )
+
+    return True
+
+
+# ============================================================
+# INSTALL SINGLE PLUGIN
+# ============================================================
+
+def install_git_plugin(
+    plugin_name,
+    repo_url,
+):
+
+    target = os.path.join(
+        ZSH_PLUGIN_DIR,
+        plugin_name,
+    )
+
+    if os.path.isdir(target):
+
+        print_success(
+            f"{plugin_name} already installed. Skipping."
+        )
+
+        return True
+
+    os.makedirs(
+        ZSH_PLUGIN_DIR,
+        exist_ok=True,
+    )
+
+    print_info(
+        f"Installing {plugin_name}..."
+    )
+
+    code = run_cmd(
+        f'git clone "{repo_url}" "{target}"',
+        check=True,
+    )
+
+    if code != 0:
+
+        print_error(
+            f"Could not install {plugin_name}."
+        )
+
+        return False
+
+    print_success(
+        f"{plugin_name} installed."
+    )
+
+    return True
 
 
 # ============================================================
@@ -406,97 +880,93 @@ def install_zsh():
 
 def install_plugin():
 
-	console.print(
-		Panel.fit(
-			"[bold green]Installing ZSH Plugins[/bold green]"
-		)
-	)
+    console.print(
+        Panel.fit(
+            "[bold green]"
+            "Installing ZSH Plugins"
+            "[/bold green]"
+        )
+    )
 
-	# --------------------------------------------------------
-	# Autosuggestions
-	# --------------------------------------------------------
+    if not oh_my_zsh_installed():
 
-	autosuggestions_dir = os.path.join(
-		ZSH_PLUGIN_DIR,
-		"zsh-autosuggestions"
-	)
+        print_error(
+            "Oh My Zsh is not installed."
+        )
 
-	if os.path.isdir(autosuggestions_dir):
+        return False
 
-		print_success(
-			"zsh-autosuggestions already installed."
-		)
+    os.makedirs(
+        ZSH_PLUGIN_DIR,
+        exist_ok=True,
+    )
 
-	else:
+    success = True
 
-		run_cmd(
-			"git clone "
-			"https://github.com/zsh-users/zsh-autosuggestions "
-			"${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/"
-			"zsh-autosuggestions"
-		)
+    # Autosuggestions
+    if not install_git_plugin(
+        "zsh-autosuggestions",
+        "https://github.com/zsh-users/zsh-autosuggestions.git",
+    ):
+        success = False
 
-	# --------------------------------------------------------
-	# Syntax Highlighting
-	# --------------------------------------------------------
+    # Syntax highlighting
+    if not install_git_plugin(
+        "zsh-syntax-highlighting",
+        "https://github.com/zsh-users/zsh-syntax-highlighting.git",
+    ):
+        success = False
 
-	syntax_dir = os.path.join(
-		ZSH_PLUGIN_DIR,
-		"zsh-syntax-highlighting"
-	)
-
-	if os.path.isdir(syntax_dir):
-
-		print_success(
-			"zsh-syntax-highlighting already installed."
-		)
-
-	else:
-
-		run_cmd(
-			"git clone "
-			"https://github.com/zsh-users/zsh-syntax-highlighting.git "
-			"${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/"
-			"zsh-syntax-highlighting"
-		)
-
-	print_success("ZSH plugin setup completed.")
+    return success
 
 
 # ============================================================
-# POWERLEVEL10K THEME
+# POWERLEVEL10K
 # ============================================================
 
 def install_theme():
 
-	console.print(
-		Panel.fit(
-			"[bold green]Installing Powerlevel10k Theme[/bold green]"
-		)
-	)
+    console.print(
+        Panel.fit(
+            "[bold green]"
+            "Installing Powerlevel10k Theme"
+            "[/bold green]"
+        )
+    )
 
-	p10k_dir = os.path.join(
-		ZSH_THEME_DIR,
-		"powerlevel10k"
-	)
+    if theme_installed():
 
-	if os.path.isdir(p10k_dir):
+        print_success(
+            "Powerlevel10k already installed. Skipping."
+        )
 
-		print_success(
-			"Powerlevel10k already installed."
-		)
+        return True
 
-		return
+    os.makedirs(
+        ZSH_THEME_DIR,
+        exist_ok=True,
+    )
 
-	run_cmd(
-		"git clone --depth=1 "
-		"https://github.com/romkatv/powerlevel10k "
-		"~/.oh-my-zsh/custom/themes/powerlevel10k"
-	)
+    code = run_cmd(
+        f'git clone --depth=1 '
+        f'"https://github.com/romkatv/powerlevel10k.git" '
+        f'"{P10K_DIR}"',
+        check=True,
+    )
 
-	print_success(
-		"Powerlevel10k installation completed."
-	)
+    if code != 0:
+
+        print_error(
+            "Powerlevel10k installation failed."
+        )
+
+        return False
+
+    print_success(
+        "Powerlevel10k installed."
+    )
+
+    return True
 
 
 # ============================================================
@@ -505,26 +975,16 @@ def install_theme():
 
 def inject_alias():
 
-	print_info("Installing custom aliases...")
+    print_info(
+        "Installing custom aliases..."
+    )
 
-	# Make sure directory exists
-	os.makedirs(
-		ALIAS_DIR,
-		exist_ok=True
-	)
+    os.makedirs(
+        ALIAS_DIR,
+        exist_ok=True,
+    )
 
-	# Create file if missing
-	if not os.path.exists(Aliash):
-
-		with open(
-			Aliash,
-			"w",
-			encoding="utf-8"
-		):
-			pass
-
-	block = """#___Termux-Setup___
-# Shortcuts for Eza
+    block = """#___Termux-Setup___
 
 alias ls='eza --icons --group-directories-first'
 alias ll='eza -l --icons'
@@ -535,102 +995,305 @@ alias update='pkg update && pkg upgrade -y'
 
 """
 
-	with open(
-		Aliash,
-		"r",
-		encoding="utf-8"
-	) as f:
+    try:
 
-		content = f.read()
+        if os.path.isfile(
+            ALIAS_FILE
+        ):
 
-	if "#___Termux-Setup___" not in content:
+            with open(
+                ALIAS_FILE,
+                "r",
+                encoding="utf-8",
+            ) as f:
 
-		with open(
-			Aliash,
-			"a",
-			encoding="utf-8"
-		) as f:
+                content = f.read()
 
-			f.write(block)
+        else:
 
-			print_success(
-				"Aliases added."
-			)
+            content = ""
 
-	else:
+        if "#___Termux-Setup___" in content:
 
-		print_success(
-			"Aliases already configured."
-		)
+            print_success(
+                "Aliases already configured. Skipping."
+            )
 
-	print(f"{c}Alias file:{stp} {Aliash}")
+        else:
+
+            with open(
+                ALIAS_FILE,
+                "a",
+                encoding="utf-8",
+            ) as f:
+
+                if content and not content.endswith(
+                    "\n"
+                ):
+                    f.write("\n")
+
+                f.write(block)
+
+            print_success(
+                "Aliases added."
+            )
+
+    except Exception as e:
+
+        print_error(
+            f"Could not install aliases: {e}"
+        )
+
+        return False
+
+    print(
+        f"{c}Alias file:{stp} {ALIAS_FILE}"
+    )
+
+    return True
 
 
 # ============================================================
-# CUSTOM ZSHRC
+# BACKUP ZSHRC
+# ============================================================
+
+def backup_zshrc():
+
+    if not os.path.isfile(
+        TARGET_ZSHRC
+    ):
+        return True
+
+    # Don't overwrite previous backup.
+    if os.path.isfile(
+        BACKUP_ZSHRC
+    ):
+
+        print_success(
+            "Existing .zshrc backup already exists."
+        )
+
+        return True
+
+    try:
+
+        shutil.copy2(
+            TARGET_ZSHRC,
+            BACKUP_ZSHRC,
+        )
+
+        print_success(
+            "Existing .zshrc backed up."
+        )
+
+        return True
+
+    except Exception as e:
+
+        print_error(
+            f"Could not backup .zshrc: {e}"
+        )
+
+        return False
+
+
+# ============================================================
+# CREATE ZSH SETUP BLOCK
+# ============================================================
+
+def get_zsh_setup_block():
+
+    return f"""
+{SETUP_MARKER}
+
+# ------------------------------------------------------------
+# Termux Full Setup
+# ------------------------------------------------------------
+
+# Oh My Zsh
+export ZSH="$HOME/.oh-my-zsh"
+
+# Powerlevel10k
+ZSH_THEME="powerlevel10k/powerlevel10k"
+
+# Oh My Zsh plugins
+plugins=(
+    git
+    zsh-autosuggestions
+    zsh-syntax-highlighting
+)
+
+# Load Oh My Zsh
+if [ -f "$ZSH/oh-my-zsh.sh" ]; then
+    source "$ZSH/oh-my-zsh.sh"
+fi
+
+# Custom aliases
+if [ -f "$ZSH/custom/aliases/from_setup.zsh" ]; then
+    source "$ZSH/custom/aliases/from_setup.zsh"
+fi
+
+# Load Powerlevel10k configuration if present
+if [ -f "$HOME/.p10k.zsh" ]; then
+    source "$HOME/.p10k.zsh"
+fi
+
+{SETUP_MARKER_END}
+"""
+
+
+# ============================================================
+# INSTALL / UPDATE ZSHRC SAFELY
 # ============================================================
 
 def install_custom_zshrc():
 
-	print_info("Installing custom .zshrc...")
+    print_info(
+        "Configuring .zshrc safely..."
+    )
 
-	if not os.path.isfile(Custom_Zshrc):
+    if not os.path.isfile(
+        TARGET_ZSHRC
+    ):
 
-		print_error(
-			"Custom .zshrc not found!"
-		)
+        try:
 
-		print(
-			f"{y}Expected:{stp} {Custom_Zshrc}"
-		)
+            with open(
+                TARGET_ZSHRC,
+                "w",
+                encoding="utf-8",
+            ) as f:
 
-		return False
+                f.write(
+                    "# Termux ZSH configuration\n"
+                )
 
-	# Backup existing .zshrc
-	if os.path.isfile(Target_Zshrc):
+            print_success(
+                "Created new .zshrc."
+            )
 
-		try:
+        except Exception as e:
 
-			shutil.copy2(
-				Target_Zshrc,
-				Backup_Zshrc
-			)
+            print_error(
+                f"Could not create .zshrc: {e}"
+            )
 
-			print_success(
-				"Existing .zshrc backed up."
-			)
+            return False
 
-		except Exception as e:
+    # --------------------------------------------------------
+    # Existing setup?
+    # --------------------------------------------------------
 
-			print_error(
-				f"Could not backup .zshrc: {e}"
-			)
+    try:
 
-			return False
+        with open(
+            TARGET_ZSHRC,
+            "r",
+            encoding="utf-8",
+        ) as f:
 
-	# Install custom .zshrc
-	try:
+            content = f.read()
 
-		shutil.copy2(
-			Custom_Zshrc,
-			Target_Zshrc
-		)
+    except Exception as e:
 
-		print_success(
-			"Custom .zshrc installed."
-		)
+        print_error(
+            f"Could not read .zshrc: {e}"
+        )
 
-	except Exception as e:
+        return False
 
-		print_error(
-			f"Could not install .zshrc: {e}"
-		)
+    # --------------------------------------------------------
+    # Already configured
+    # --------------------------------------------------------
 
-		return False
+    if (
+        SETUP_MARKER in content
+        and
+        SETUP_MARKER_END in content
+    ):
 
-	print(f"{c}Installed:{stp} {Target_Zshrc}")
+        print_success(
+            "Termux setup block already exists in .zshrc."
+        )
 
-	return True
+        return True
+
+    # --------------------------------------------------------
+    # Backup before modification
+    # --------------------------------------------------------
+
+    if not backup_zshrc():
+
+        return False
+
+    # --------------------------------------------------------
+    # Append our configuration
+    # --------------------------------------------------------
+
+    try:
+
+        block = get_zsh_setup_block()
+
+        if not content.endswith("\n"):
+            content += "\n"
+
+        content += block
+
+        with open(
+            TARGET_ZSHRC,
+            "w",
+            encoding="utf-8",
+        ) as f:
+
+            f.write(content)
+
+        print_success(
+            "ZSH configuration added without replacing existing config."
+        )
+
+        return True
+
+    except Exception as e:
+
+        print_error(
+            f"Could not update .zshrc: {e}"
+        )
+
+        return False
+
+
+# ============================================================
+# CREATE ZSH COMPLETION MARKER
+# ============================================================
+
+def create_zsh_marker():
+
+    try:
+
+        with open(
+            ZSH_SETUP_MARKER,
+            "w",
+            encoding="utf-8",
+        ) as f:
+
+            f.write(
+                "TERMUX_FULL_SETUP_ZSH=1\n"
+                f"VERSION={ZSH_SETUP_VERSION}\n"
+            )
+
+        print_success(
+            "ZSH setup completion marker created."
+        )
+
+        return True
+
+    except Exception as e:
+
+        print_error(
+            f"Could not create ZSH marker: {e}"
+        )
+
+        return False
 
 
 # ============================================================
@@ -639,63 +1302,129 @@ def install_custom_zshrc():
 
 def setup_zsh():
 
-	clear()
+    clear()
 
-	console.print(
-		Panel.fit(
-			"[bold cyan]ZSH COMPLETE SETUP[/bold cyan]"
-		)
-	)
+    console.print(
+        Panel.fit(
+            "[bold cyan]"
+            "ZSH COMPLETE SETUP"
+            "[/bold cyan]"
+        )
+    )
 
-	# IMPORTANT ORDER:
-	#
-	# ZSH
-	# ↓
-	# Oh My Zsh
-	# ↓
-	# Plugins
-	# ↓
-	# Theme
-	# ↓
-	# Aliases
-	# ↓
-	# Custom .zshrc
+    # --------------------------------------------------------
+    # Already complete?
+    # --------------------------------------------------------
 
-	install_zsh()
+    if is_zsh_setup_complete():
 
-	clear()
+        print_success(
+            "ZSH setup is already complete."
+        )
 
-	install_plugin()
+        print_info(
+            "Skipping ZSH setup to prevent overwriting."
+        )
 
-	clear()
+        return True
 
-	install_theme()
+    # --------------------------------------------------------
+    # ZSH
+    # --------------------------------------------------------
 
-	clear()
+    if not install_zsh():
 
-	inject_alias()
+        return False
 
-	clear()
+    clear()
 
-	install_custom_zshrc()
+    # --------------------------------------------------------
+    # Plugins
+    # --------------------------------------------------------
 
-	clear()
+    if not install_plugin():
 
-	print()
-	print("=" * 45)
-	print(f"{g}        ZSH SETUP COMPLETED ✓{stp}")
-	print("=" * 45)
-	print()
+        print_warning(
+            "Some ZSH plugins could not be installed."
+        )
 
-	print(
-		f"{y}Restart Termux or run:{stp}"
-	)
+    clear()
 
-	print(
-		f"{c}source ~/.zshrc{stp}"
-	)
+    # --------------------------------------------------------
+    # Theme
+    # --------------------------------------------------------
 
-	pause(2)
+    if not install_theme():
+
+        return False
+
+    clear()
+
+    # --------------------------------------------------------
+    # Aliases
+    # --------------------------------------------------------
+
+    if not inject_alias():
+
+        return False
+
+    clear()
+
+    # --------------------------------------------------------
+    # ZSHRC
+    # --------------------------------------------------------
+
+    if not install_custom_zshrc():
+
+        return False
+
+    clear()
+
+    # --------------------------------------------------------
+    # Final verification
+    # --------------------------------------------------------
+
+    if (
+        zsh_installed()
+        and oh_my_zsh_installed()
+        and plugin_installed(
+            "zsh-autosuggestions"
+        )
+        and plugin_installed(
+            "zsh-syntax-highlighting"
+        )
+        and theme_installed()
+        and os.path.isfile(ALIAS_FILE)
+        and zshrc_has_setup()
+    ):
+
+        create_zsh_marker()
+
+        print()
+        print("=" * 50)
+        print(
+            f"{g}       ZSH SETUP COMPLETED ✓{stp}"
+        )
+        print("=" * 50)
+        print()
+
+        print(
+            f"{y}Restart Termux or run:{stp}"
+        )
+
+        print(
+            f"{c}source ~/.zshrc{stp}"
+        )
+
+        pause(2)
+
+        return True
+
+    print_error(
+        "ZSH setup verification failed."
+    )
+
+    return False
 
 
 # ============================================================
@@ -704,33 +1433,52 @@ def setup_zsh():
 
 def install_language():
 
-	console.print(
-		Panel.fit(
-			"""[bold green]
-Installing Development Languages
+    console.print(
+        Panel.fit(
+            "[bold green]"
+            "Installing Development Languages"
+            "[/bold green]\n\n"
+            "Node.js\n"
+            "C/C++\n"
+            "Go"
+        )
+    )
 
-1. Node.js
-2. C/C++
-3. Go
-			[/bold green]"""
-		)
-	)
+    packages = [
+        "nodejs",
+        "clang",
+        "golang",
+    ]
 
-	run_cmd(
-		"pkg install nodejs -y"
-	)
+    missing = [
+        package
+        for package in packages
+        if not package_installed(package)
+    ]
 
-	run_cmd(
-		"pkg install clang -y"
-	)
+    if not missing:
 
-	run_cmd(
-		"pkg install golang -y"
-	)
+        print_success(
+            "Development languages already installed."
+        )
 
-	print_success(
-		"Development language installation completed."
-	)
+        return True
+
+    code = run_cmd(
+        "pkg install "
+        + " ".join(missing)
+        + " -y",
+        check=True,
+    )
+
+    if code != 0:
+        return False
+
+    print_success(
+        "Development language installation completed."
+    )
+
+    return True
 
 
 # ============================================================
@@ -739,43 +1487,74 @@ Installing Development Languages
 
 def install_network_tool():
 
-	console.print(
-		Panel.fit(
-			"""[bold green]
-Installing Network Tools
+    console.print(
+        Panel.fit(
+            "[bold green]"
+            "Installing Network Tools"
+            "[/bold green]\n\n"
+            "Nmap\n"
+            "PHP\n"
+            "Cloudflared\n"
+            "Requests\n"
+            "Flask"
+        )
+    )
 
-1. Nmap
-2. PHP
-3. Cloudflared
-4. Requests
-5. Flask
-			[/bold green]"""
-		)
-	)
+    packages = [
+        "nmap",
+        "php",
+        "cloudflared",
+    ]
 
-	run_cmd(
-		"pkg install nmap -y"
-	)
+    missing = [
+        package
+        for package in packages
+        if not package_installed(package)
+    ]
 
-	run_cmd(
-		"pkg install php -y"
-	)
+    if missing:
 
-	run_cmd(
-		"pkg install cloudflared -y"
-	)
+        code = run_cmd(
+            "pkg install "
+            + " ".join(missing)
+            + " -y",
+            check=True,
+        )
 
-	run_cmd(
-		"python -m pip install requests"
-	)
+        if code != 0:
+            print_warning(
+                "Some Termux network packages failed."
+            )
 
-	run_cmd(
-		"python -m pip install flask"
-	)
+    else:
 
-	print_success(
-		"Network tools installation completed."
-	)
+        print_success(
+            "Nmap, PHP and Cloudflared already installed."
+        )
+
+    # --------------------------------------------------------
+    # Python Requests
+    # --------------------------------------------------------
+
+    run_cmd(
+        "python -m pip install requests",
+        check=False,
+    )
+
+    # --------------------------------------------------------
+    # Flask
+    # --------------------------------------------------------
+
+    run_cmd(
+        "python -m pip install flask",
+        check=False,
+    )
+
+    print_success(
+        "Network tools installation completed."
+    )
+
+    return True
 
 
 # ============================================================
@@ -784,66 +1563,115 @@ Installing Network Tools
 
 def menu():
 
-	clear()
+    clear()
 
-	print("=" * 45)
-	print("        Welcome to Termux Setup")
-	print("=" * 45)
+    print("=" * 50)
+    print("        Welcome to Termux Setup")
+    print("=" * 50)
 
-	print()
-	print(
-		f"{g}✓ Mandatory packages will be installed automatically.{stp}"
-	)
+    print()
 
-	print()
-	print("1. Git, Wget, Curl (Auto)")
-	print("2. Languages")
-	print("3. Network Tools")
-	print("4. Setup ZSH (Theme, Autosuggestions, Autocomplete, Highlighting")
-	print()
-	print("All")
-	print()
+    print(
+        f"{g}✓ Mandatory packages will be installed automatically."
+        f"{stp}"
+    )
 
-	choice = input(
-		"Enter your choice (e.g: 2,3,4 or All): "
-	).lower().strip()
+    print()
 
-	return choice
+    print(
+        "1. Mandatory Packages"
+    )
+
+    print(
+        "2. Languages"
+    )
+
+    print(
+        "3. Network Tools"
+    )
+
+    print(
+        "4. Setup ZSH + Theme + Plugins"
+    )
+
+    print()
+
+    print(
+        "All"
+    )
+
+    print()
+
+    try:
+
+        choice = input(
+            "Enter your choice (e.g: 2,3,4 or All): "
+        )
+
+    except KeyboardInterrupt:
+        handle_interrupt()
+
+    except EOFError:
+
+        print()
+        print_warning(
+            "Input closed."
+        )
+
+        return "all"
+
+    return choice.lower().strip()
 
 
 # ============================================================
-# COMPLETION MESSAGE
+# SETUP COMPLETE
 # ============================================================
 
 def setup_complete():
 
-	clear()
+    clear()
 
-	print()
-	print("=" * 50)
-	print()
-	print(
-		f"{g}       🎉 TERMUX SETUP COMPLETED!{stp}"
-	)
-	print()
-	print("=" * 50)
+    print()
+    print("=" * 55)
+    print()
+    print(
+        f"{g}       🎉 TERMUX SETUP COMPLETED!{stp}"
+    )
+    print()
+    print("=" * 55)
 
-	print()
-	print(
-		f"{c}Your Termux environment is ready.{stp}"
-	)
+    print()
 
-	print()
+    print(
+        f"{c}Your Termux environment is ready.{stp}"
+    )
 
-	print(
-		f"{y}If ZSH was installed, restart Termux or run:{stp}"
-	)
+    print()
 
-	print(
-		f"{g}source ~/.zshrc{stp}"
-	)
+    if is_zsh_setup_complete():
 
-	print()
+        print(
+            f"{y}ZSH setup is installed and protected from re-installation."
+            f"{stp}"
+        )
+
+        print()
+
+        print(
+            f"{g}Restart Termux or run:{stp}"
+        )
+
+        print(
+            f"{c}source ~/.zshrc{stp}"
+        )
+
+    else:
+
+        print(
+            f"{y}ZSH was not completely configured.{stp}"
+        )
+
+    print()
 
 
 # ============================================================
@@ -852,111 +1680,163 @@ def setup_complete():
 
 def main():
 
-	# --------------------------------------------------------
-	# Step 1: Create directories
-	# --------------------------------------------------------
+    # --------------------------------------------------------
+    # Create directories
+    # --------------------------------------------------------
 
-	create_folders()
+    create_folders()
 
-	# --------------------------------------------------------
-	# Step 2: User information
-	# --------------------------------------------------------
+    # --------------------------------------------------------
+    # User information
+    # --------------------------------------------------------
 
-	set_username()
+    set_username()
 
-	# --------------------------------------------------------
-	# Step 3: Menu
-	# --------------------------------------------------------
+    # --------------------------------------------------------
+    # Menu
+    # --------------------------------------------------------
 
-	choice = menu()
+    choice = menu()
 
-	# --------------------------------------------------------
-	# Step 4: Mandatory packages
-	# --------------------------------------------------------
+    # --------------------------------------------------------
+    # Mandatory packages
+    # --------------------------------------------------------
 
-	clear()
+    clear()
 
-	print(
-		f"{g}Starting Mandatory Setup...{stp}"
-	)
+    print(
+        f"{g}Starting Mandatory Setup...{stp}"
+    )
 
-	mandatory_install()
+    if not mandatory_install():
 
-	# --------------------------------------------------------
-	# Step 5: Selected modules
-	# --------------------------------------------------------
+        print_error(
+            "Mandatory setup failed."
+        )
 
-	if choice == "all":
+        return 1
 
-		# Languages
-		clear()
-		install_language()
+    # --------------------------------------------------------
+    # ALL
+    # --------------------------------------------------------
 
-		# Network tools
-		clear()
-		install_network_tool()
+    if choice == "all":
 
-		# ZSH
-		clear()
-		setup_zsh()
+        # ----------------------------------------------------
+        # Languages
+        # ----------------------------------------------------
 
-	else:
+        clear()
 
-		selections = [
-			item.strip()
-			for item in choice.split(",")
-		]
+        install_language()
 
-		# ----------------------------------------------------
-		# 1. Mandatory
-		# ----------------------------------------------------
+        # ----------------------------------------------------
+        # Network
+        # ----------------------------------------------------
 
-		if "1" in selections:
+        clear()
 
-			clear()
+        install_network_tool()
 
-			print(
-				f"{g}Git, Wget and Curl are included "
-				f"in Mandatory packages.{stp}"
-			)
+        # ----------------------------------------------------
+        # ZSH
+        # ----------------------------------------------------
 
-			pause(1)
+        clear()
 
-		# ----------------------------------------------------
-		# 2. Languages
-		# ----------------------------------------------------
+        if is_zsh_setup_complete():
 
-		if "2" in selections:
+            print_success(
+                "ZSH + Theme + Plugins already configured."
+            )
 
-			clear()
+            print_info(
+                "Skipping option 4."
+            )
 
-			install_language()
+        else:
 
-		# ----------------------------------------------------
-		# 3. Network
-		# ----------------------------------------------------
+            setup_zsh()
 
-		if "3" in selections:
+    # --------------------------------------------------------
+    # Selected options
+    # --------------------------------------------------------
 
-			clear()
+    else:
 
-			install_network_tool()
+        selections = [
+            item.strip()
+            for item in choice.split(",")
+        ]
 
-		# ----------------------------------------------------
-		# 4. ZSH
-		# ----------------------------------------------------
+        # ----------------------------------------------------
+        # 1
+        # ----------------------------------------------------
 
-		if "4" in selections:
+        if "1" in selections:
 
-			clear()
+            clear()
 
-			setup_zsh()
+            print(
+                f"{g}"
+                "Mandatory packages "
+                "are already handled automatically."
+                f"{stp}"
+            )
 
-	# --------------------------------------------------------
-	# Final
-	# --------------------------------------------------------
+            pause(1)
 
-	setup_complete()
+        # ----------------------------------------------------
+        # 2
+        # ----------------------------------------------------
+
+        if "2" in selections:
+
+            clear()
+
+            install_language()
+
+        # ----------------------------------------------------
+        # 3
+        # ----------------------------------------------------
+
+        if "3" in selections:
+
+            clear()
+
+            install_network_tool()
+
+        # ----------------------------------------------------
+        # 4
+        # ----------------------------------------------------
+
+        if "4" in selections:
+
+            clear()
+
+            if is_zsh_setup_complete():
+
+                print_success(
+                    "ZSH setup already complete."
+                )
+
+                print_info(
+                    "Nothing will be overwritten."
+                )
+
+                pause(2)
+
+            else:
+
+                setup_zsh()
+
+    # --------------------------------------------------------
+    # Final
+    # --------------------------------------------------------
+
+    setup_complete()
+
+    return 0
 
 
 # ============================================================
@@ -964,4 +1844,36 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
-	main()
+
+    try:
+
+        sys.exit(
+            main()
+        )
+
+    except KeyboardInterrupt:
+
+        handle_interrupt()
+
+    except EOFError:
+
+        print()
+        print_warning(
+            "Input closed. Exiting safely."
+        )
+
+        sys.exit(0)
+
+    except Exception as e:
+
+        print()
+        print_error(
+            f"Unexpected error: {e}"
+        )
+
+        print(
+            f"{y}[!] Your existing configuration was not intentionally removed."
+            f"{stp}"
+        )
+
+        sys.exit(1)

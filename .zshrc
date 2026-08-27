@@ -27,11 +27,11 @@ export ZSH="$HOME/.oh-my-zsh"
 # THEME
 # ==============================
 
-if [ -d "$ZSH/custom/themes/powerlevel10k" ]; then
-	ZSH_THEME="powerlevel10k/powerlevel10k"
-else
-	ZSH_THEME="robbyrussell"
-fi
+#if [ -d "$ZSH/custom/themes/powerlevel10k" ]; then
+#	ZSH_THEME="powerlevel10k/powerlevel10k"
+#else
+#	ZSH_THEME="robbyrussell"
+#fi
 
 
 # ==============================
